@@ -1,0 +1,11 @@
+import  tensorflow as tf
+import  gym
+from  gym import envs
+
+print(envs.registry.all())
+
+env = gym.make('MountainCarContinuous-v0')
+env.reset()
+for _ in range(100):
+    env.render()
+    env.step(env.action_space.sample())
