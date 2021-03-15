@@ -1,0 +1,108 @@
+import os
+import zipfile
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import  tensorflow as tf
+from tensorflow.keras.optimizers import RMSprop
+from  tensorflow.keras.preprocessing.image import ImageDataGenerator
+import numpy as np
+
+from google.colab import files
+from keras.preprocessing import image
+
+
+
+#加载数据以及解压到另外一个文件
+local_zip = '../data/person_horse/horse-or-human.zip'
+zip_ref = zipfile.ZipFile(local_zip,'r')
+zip_ref.extractall('../data/person_horse/horse-or-human')
+zip_ref.close()
+#将数据集分开
+train_horse_dir = os.path.join('../data/person_horse/horse-or-human/horses')
+train_human_dir = os.path.join('../data/person_horse/horse-or-human/humans')
+#将两个文件夹中的文件名读取出来
+train_horse_name = os.listdir(train_horse_dir)
+train_human_name = os.listdir(train_human_dir)
+# print(len(os.lisdir(train_human_dir)))
+'''显示一些图像'''
+nrows = 4
+ncols = 4
+pic_index = 0 # 图的索引
+fig = plt.gcf()
+fig.set_size_inches(ncols * 4, nrows * 4)
+
+pic_index += 8
+next_horse_pix = [os.path.join(train_horse_dir, fname)
+                for fname in train_horse_name[pic_index-8:pic_index]]
+next_human_pix = [os.path.join(train_human_dir, fname)
+                for fname in train_human_name[pic_index-8:pic_index]]
+
+for i, img_path in enumerate(next_horse_pix+next_human_pix):
+
+  sp = plt.subplot(nrows, ncols, i + 1)
+  sp.axis('Off') # 不显示坐标
+  img = mpimg.imread(img_path)
+  plt.imshow(img)
+
+plt.show()
+
+'''数据预处理'''
+train_datagn = ImageDataGenerator(rescale=1/255)
+train_generator = train_datagn.flow_from_directory(
+    '../data/person_horse/horse-or-human',
+    target_size= (300,300), # 输入的目标尺寸大小
+    batch_size= 128, # 每一批样本的大小是128
+    class_mode= 'binary' #
+)
+
+
+'''构建模型'''
+model = tf.keras.models.Sequential([
+    tf.keras.layers.Conv2D(16,(3,3),activation='relu',input_shape=(300,300,3)),
+    tf.keras.layers.MaxPooling2D(2,2),
+    tf.keras.layers.Conv2D(32,(3,3),activation='relu'),
+    tf.keras.layers.MaxPooling2D(2,2),
+    tf.keras.layers.Conv2D(64,(3,3),activation='relu'),
+    tf.keras.layers.MaxPooling2D(2,2),
+    tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+    tf.keras.layers.MaxPooling2D(2, 2),
+    tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+    tf.keras.layers.MaxPooling2D(2, 2),
+    tf.keras.layers.Flatten(),
+    tf.keras.layers.Dense(512,activation= 'relu'), # 只有一个全连接隐层
+    tf.keras.layers.Dense(1,activation= 'sigmoid')
+])
+
+model.summary()
+
+model.compile(loss='binary_crossentropy',
+              optimizer=RMSprop(lr=0.01),#定义学习步长
+              metrics=['acc'])
+
+history = model.fit_generator(
+    train_generator,
+    steps_per_epoch=8,#通过计算算出来
+    epochs=4,
+    verbose=1
+)
+
+'''应用'''
+
+
+uploaded = files.upload()
+
+for fn in uploaded.keys():
+
+    # predicting images
+    path = '../data/person_horse/' + fn
+    img = image.load_img(path, target_size=(300, 300))
+    x = image.img_to_array(img)
+    x = np.expand_dims(x, axis=0) # expand_dims 按水平方向展成向量
+
+    images = np.vstack([x])
+    classes = model.predict(images, batch_size=10)
+    print(classes[0])
+    if classes[0] > 0.5:
+        print(fn + " is a human")
+    else:
+        print(fn + " is a horse")
