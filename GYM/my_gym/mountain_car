@@ -1,0 +1,241 @@
+
+import math
+
+import numpy as np
+
+import gym
+from gym import spaces
+from gym.utils import seeding
+
+SCALE  = 30.0
+class MountainCarEnv(gym.Env):
+    """
+    Description:
+        The agent (a car) is started at the bottom of a valley. For any given
+        state the agent may choose to accelerate to the left, right or cease
+        any acceleration.
+
+    Source:
+        The environment appeared first in Andrew Moore's PhD Thesis (1990).
+
+    Observation:
+        Type: Box(2)
+        Num    Observation               Min            Max
+        0      Car Position              -1.2           0.6
+        1      Car Velocity              -0.07          0.07
+
+    Actions:
+        Type: Discrete(3)
+        Num    Action
+        0      Accelerate to the Left
+        1      Don't accelerate
+        2      Accelerate to the Right
+
+        Note: This does not affect the amount of velocity affected by the
+        gravitational pull acting on the car.
+
+    Reward:
+         Reward of 0 is awarded if the agent reached the flag (position = 0.5)
+         on top of the mountain.
+         Reward of -1 is awarded if the position of the agent is less than 0.5.
+
+    Starting State:
+         The position of the car is assigned a uniform random value in
+         [-0.6 , -0.4].
+         The starting velocity of the car is always assigned to 0.
+
+    Episode Termination:
+         The car position is more than 0.5
+         Episode length is greater than 200
+    """
+
+    metadata = {
+        'render.modes': ['human', 'rgb_array'],
+        'video.frames_per_second': 3
+    }
+
+    def __init__(self, goal_velocity=0):
+        self.min_position = -2.4
+        self.max_position = 1.2
+        self.max_speed = 0.07
+        self.goal_position = 0.5
+        self.goal_velocity = goal_velocity
+
+        self.force = 0.001
+        self.gravity = 0.0025
+
+        self.low = np.array(
+            [self.min_position, -self.max_speed], dtype=np.float32
+        )
+        self.high = np.array(
+            [self.max_position, self.max_speed], dtype=np.float32
+        )
+
+        self.viewer = None
+
+        self.action_space = spaces.Discrete(3)
+        self.observation_space = spaces.Box(
+            self.low, self.high, dtype=np.float32
+        )
+
+        self.seed(5)
+
+    def seed(self, seed=None):
+        self.np_random, seed = seeding.np_random(seed)
+        return [seed]
+
+    def step(self, action):
+        assert self.action_space.contains(action), "%r (%s) invalid" % (action, type(action))
+
+        position, velocity = self.state
+        velocity += (action - 1) * self.force + math.cos(3 * position) * (-self.gravity)
+        velocity = np.clip(velocity, -self.max_speed, self.max_speed)
+        position += velocity
+        position = np.clip(position, self.min_position, self.max_position)
+        if (position == self.min_position and velocity < 0):
+            velocity = 0
+
+        done = bool(
+            position >= self.goal_position and velocity >= self.goal_velocity
+        )
+        reward = -1.0
+
+        self.state = (position, velocity)
+        return np.array(self.state), reward, done, {}
+
+    def reset(self):
+        self.state = np.array([self.np_random.uniform(low=-0.6, high=-0.4), 0])
+        self.scroll = 0.0
+        return np.array(self.state)
+
+    def _height(self, xs):
+        return np.sin(3 * xs) * .45 + 0.60
+
+    # def _generate_clouds(self):
+    #     # Sorry for the clouds, couldn't resist
+    #     self.cloud_poly   = []
+    #     for i in range(TERRAIN_LENGTH//20):
+    #         x = self.np_random.uniform(0, TERRAIN_LENGTH)*TERRAIN_STEP
+    #         y = VIEWPORT_H/SCALE*3/4
+    #         poly = [
+    #             (x+15*TERRAIN_STEP*math.sin(3.14*2*a/5)+self.np_random.uniform(0,5*TERRAIN_STEP),
+    #              y+ 5*TERRAIN_STEP*math.cos(3.14*2*a/5)+self.np_random.uniform(0,5*TERRAIN_STEP) )
+    #             for a in range(5) ]
+    #         x1 = min( [p[0] for p in poly] )
+    #         x2 = max( [p[0] for p in poly] )
+    #         self.cloud_poly.append( (poly,x1,x2) )
+
+    def render(self, mode='human'):
+        screen_width = 600
+        screen_height = 400
+
+        world_width = self.max_position - self.min_position
+        scale = screen_width / world_width
+        carwidth = 60
+        carheight = 25
+
+        if self.viewer is None:  # viewer 画板
+            from gym.envs.classic_control import rendering
+            self.viewer = rendering.Viewer(screen_width + 15, screen_height)  # 15
+            xs = np.linspace(self.min_position, self.max_position, 15)  # np.linspace（）割取点，绘图时的平滑度，正常应该是100
+            ys = self._height( xs )  # 应该没有48
+            xys = list(zip((xs - self.min_position) * scale, ys * scale))
+
+            # self.viewer.draw_polygon([
+            #     (self.scroll, 0),
+            #     (self.scroll + screen_width / SCALE, 0),
+            #     (self.scroll + screen_width / SCALE, screen_height / SCALE),
+            #     (self.scroll, screen_height / SCALE),
+            # ], color=(0.9, 0.9, 1.0))
+            # for poly, x1, x2 in self.cloud_poly:
+            #     if x2 < self.scroll / 2: continue
+            #     if x1 > self.scroll / 2 + VIEWPORT_W / SCALE: continue
+            #     self.viewer.draw_polygon([(p[0] + self.scroll / 2, p[1]) for p in poly], color=(1, 1, 1))
+            # for poly, color in self.terrain_poly:
+            #     if poly[1][0] < self.scroll: continue
+            #     if poly[0][0] > self.scroll + VIEWPORT_W / SCALE: continue
+            #     self.viewer.draw_polygon(poly, color=color)
+
+            self.track = rendering.make_polyline(xys)
+            self.track.set_linewidth(4)   # 线条宽度
+            # 把图形元素添加到画板中
+            self.viewer.add_geom(self.track)
+
+            clearance = 12  # 能控制车线贴合度
+
+            """车体部分"""
+            l, r, t, b = -carwidth / 2, carwidth / 4, carheight, 0
+            car = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])  # rendering.FilledPolygon 为填充一个矩阵
+            car.add_attr(rendering.Transform(translation=(0, clearance)))  # car.add_attr(rendering.Transform())添加平移这个属性
+            self.cartrans = rendering.Transform()   # rendering.Transform()作用为添加一个平移操作
+            car.add_attr(self.cartrans)
+            # 把图形元素添加到画板中
+            self.viewer.add_geom(car)
+            """车轮部分"""
+            frontwheel = rendering.make_circle(carheight  / 3.5)  # 3.5可改变轮子大小
+            frontwheel.set_color(.6, .6, .6)  #.5, .5, .5
+            frontwheel.add_attr(
+                rendering.Transform(translation=(carwidth / 4,clearance  ))  #carwidth / 4 平移，clearance  竖移
+            )
+            frontwheel.add_attr(self.cartrans)
+            # 把图形元素添加到画板中
+            self.viewer.add_geom(frontwheel)
+
+            frontwheel2 = rendering.make_circle(carheight / 3.5)
+            frontwheel2.set_color(0.1, 0.1, 0.1)  # .5, .5, .5
+            frontwheel2.add_attr(
+                 rendering.Transform(translation=(carwidth / 320, clearance))
+             )
+            frontwheel2.add_attr(self.cartrans)
+            # 把图形元素添加到画板中
+            self.viewer.add_geom(frontwheel2)
+
+
+            backwheel = rendering.make_circle(carheight / 3.5)
+            backwheel.add_attr(
+                rendering.Transform(translation=(-carwidth / 2.5, clearance))
+            )
+            backwheel.add_attr(self.cartrans)
+            # 把图形元素添加到画板中
+            backwheel.set_color(.5, .5, .5)
+            self.viewer.add_geom(backwheel)
+
+            '''绿色灯光'''
+            light = rendering.make_circle(carheight / 7)
+            light.set_color(0, 255, 0)
+            light.add_attr(
+                rendering.Transform(translation=(carwidth / 4, 28))
+            )
+            light.add_attr(self.cartrans)
+            # 把图形元素添加到画板中
+            self.viewer.add_geom(light)
+
+            """旗子部分"""
+            flagx = (self.goal_position-self.min_position) * scale
+            flagy1 = self._height(self.goal_position) * scale
+            flagy2 = flagy1 + 50   #旗杆长度
+            flagpole = rendering.Line((flagx, flagy1 ), (flagx , flagy2))  #flagx代表旗杆两点的位置
+            self.viewer.add_geom(flagpole)
+            flag = rendering.FilledPolygon(
+                [(flagx, flagy2), (flagx, flagy2 - 10), (flagx + 25, flagy2 - 5)]
+            )
+            flag.set_color(0.5,0.4,0.9)
+            self.viewer.add_geom(flag)
+
+        pos = self.state[0]
+        self.cartrans.set_translation(
+            (pos-self.min_position) * scale, self._height(pos) * scale
+        )
+        self.cartrans.set_rotation(math.cos(3 * pos))
+
+        return self.viewer.render(return_rgb_array=mode == 'rgb_array')
+
+
+    def get_keys_to_action(self):
+        # Control with left and right arrow keys.
+        return {(): 1, (276,): 0, (275,): 2, (275, 276): 1}
+
+    def close(self):
+        if self.viewer:
+            self.viewer.close()
+            self.viewer = None
